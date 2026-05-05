@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Fetcher handles the I/O, just retrieving the raw binary data.
@@ -28,14 +30,19 @@ func (f *CachedFetcher) Fetch(ctx context.Context) ([]byte, error) {
 
 	cached, err := util.CacheGetString(cacheKey)
 	if err == nil && cached != "" {
+		logrus.WithField("cacheKey", cacheKey).Debugf("search source cache hit")
 		return []byte(cached), nil
 	}
 
+	start := time.Now()
 	data, err := f.Internal.Fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	logrus.WithField("cacheKey", cacheKey).WithField("duration", time.Since(start)).Infof("search source cache miss, fetched from internal")
 
-	_ = util.CacheSetString(cacheKey, string(data), f.Expire)
+	if cacheErr := util.CacheSetString(cacheKey, string(data), f.Expire); cacheErr != nil {
+		logrus.WithField("cacheKey", cacheKey).WithError(cacheErr).Warn("failed to cache search source result")
+	}
 	return data, nil
 }

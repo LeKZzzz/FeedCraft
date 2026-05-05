@@ -159,6 +159,7 @@ func expandQueryWithLLM(query string) ([]string, error) {
 	if err := json.Unmarshal([]byte(jsonStr), &queries); err != nil {
 		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
 	}
+	logrus.WithField("query", query).WithField("expanded_count", len(queries)).Debugf("search query expanded")
 	return queries, nil
 }
 

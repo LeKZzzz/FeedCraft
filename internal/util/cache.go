@@ -40,23 +40,36 @@ func CacheGetString(key string) (string, error) {
 
 // CachedFuncWithPreLog tries to get from cache, invokes preLog if provided, and if absent, calls valFunc and saves to cache
 func CachedFuncWithPreLog(cacheKey string, valFunc func() (string, error), preLog func(isCached bool)) (string, error) {
+	logKey := cacheKey
+	if len(logKey) > 50 {
+		logKey = logKey[:50] + "..."
+	}
+
 	final := ""
 	cached, err := CacheGetString(cacheKey)
 	isCached := err == nil && cached != ""
+
+	if isCached {
+		logrus.WithField("cacheKey", logKey).Debugf("cache hit")
+	} else {
+		logrus.WithField("cacheKey", logKey).Infof("cache miss, invoking valFunc")
+	}
 
 	if preLog != nil {
 		preLog(isCached)
 	}
 
 	if !isCached {
+		start := time.Now()
 		processedContent, getValErr := valFunc()
 		if getValErr != nil {
 			return "", getValErr
 		} else {
+			logrus.WithField("cacheKey", logKey).WithField("duration", time.Since(start)).Infof("valFunc completed")
 			final = processedContent
 			cacheErr := CacheSetString(cacheKey, processedContent, constant.WebContentExpire)
 			if cacheErr != nil {
-				logrus.Warn("failed to cache result")
+				logrus.WithField("cacheKey", logKey).WithError(cacheErr).Warn("failed to cache result")
 			}
 		}
 	} else {

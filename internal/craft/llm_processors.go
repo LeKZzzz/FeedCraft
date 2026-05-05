@@ -320,7 +320,9 @@ func GetCommonCachedArticlePredicate(cacheKeyGenerator ArticleCacheKeyGenerator,
 		if err != nil {
 			return false, err
 		}
-		return strings.EqualFold(strings.TrimSpace(value), "true"), nil
+		result := strings.EqualFold(strings.TrimSpace(value), "true")
+		logrus.WithField("craft", craftName).WithField("article", article.Title).WithField("matched", result).Debugf("predicate evaluated")
+		return result, nil
 	}
 }
 

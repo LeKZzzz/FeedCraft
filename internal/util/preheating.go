@@ -91,15 +91,19 @@ func (s *PreheatingScheduler) ScheduleTask(recipeName string) {
 			}
 
 			if s.shouldRun != nil && !s.shouldRun(recipeName) {
+				logrus.WithField("recipe", recipeName).Infof("preheating skipped: resource paused")
 				if s.onSkip != nil {
 					s.onSkip(recipeName)
 				}
 				return
 			}
 
+			start := time.Now()
 			err := s.taskFunc(recipeName)
 			if err != nil {
 				logrus.Errorf("preheating task for recipe [%s] exec failed. err: %v", recipeName, err)
+			} else {
+				logrus.WithField("recipe", recipeName).WithField("duration", time.Since(start)).Infof("preheating completed")
 			}
 			s.ScheduleTask(recipeName)
 		}()
