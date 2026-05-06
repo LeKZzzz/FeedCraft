@@ -53,6 +53,17 @@ func CachedFuncWithPreLog(cacheKey string, valFunc func() (string, error), preLo
 	if isCached {
 		logrus.WithField("cacheKey", logKey).Debugf("cache hit")
 	} else {
+		// Redis miss — try persistent cache
+		if isPersistentCacheKey(cacheKey) {
+			if persisted, ok := persistentCacheGet(cacheKey); ok {
+				logrus.WithField("cacheKey", logKey).Debugf("persistent cache hit")
+				_ = CacheSetString(cacheKey, persisted, constant.WebContentExpire)
+				if preLog != nil {
+					preLog(true)
+				}
+				return persisted, nil
+			}
+		}
 		logrus.WithField("cacheKey", logKey).Infof("cache miss, invoking valFunc")
 	}
 
@@ -71,6 +82,9 @@ func CachedFuncWithPreLog(cacheKey string, valFunc func() (string, error), preLo
 			cacheErr := CacheSetString(cacheKey, processedContent, constant.WebContentExpire)
 			if cacheErr != nil {
 				logrus.WithField("cacheKey", logKey).WithError(cacheErr).Warn("failed to cache result")
+			}
+			if isPersistentCacheKey(cacheKey) {
+				persistentCacheSet(cacheKey, processedContent)
 			}
 		}
 	} else {
@@ -109,6 +123,23 @@ func CachedFuncWithStructuredValue(cacheKey string, metaJSON string, valFunc fun
 		}
 	}
 
+	// Redis miss — try persistent cache
+	if isPersistentCacheKey(cacheKey) {
+		if persisted, ok := persistentCacheGet(cacheKey); ok {
+			var entry struct {
+				Value string `json:"value"`
+			}
+			if jsonErr := json.Unmarshal([]byte(persisted), &entry); jsonErr == nil && entry.Value != "" {
+				logrus.WithField("cacheKey", logKey).Debugf("persistent cache hit")
+				_ = CacheSetString(cacheKey, persisted, constant.WebContentExpire)
+				if preLog != nil {
+					preLog(true)
+				}
+				return entry.Value, nil
+			}
+		}
+	}
+
 	logrus.WithField("cacheKey", logKey).
 		WithField("meta", metaJSON).
 		Infof("cache miss, invoking valFunc")
@@ -128,6 +159,10 @@ func CachedFuncWithStructuredValue(cacheKey string, metaJSON string, valFunc fun
 	cacheErr := CacheSetString(cacheKey, entryJSON, constant.WebContentExpire)
 	if cacheErr != nil {
 		logrus.WithField("cacheKey", logKey).WithError(cacheErr).Warn("failed to cache result")
+	}
+
+	if isPersistentCacheKey(cacheKey) {
+		persistentCacheSet(cacheKey, entryJSON)
 	}
 
 	return result, nil

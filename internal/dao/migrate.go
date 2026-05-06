@@ -24,6 +24,7 @@ func MigrateDatabases() {
 		&ExecutionLog{},
 		&ResourceHealth{},
 		&SystemNotification{},
+		&util.PersistentCacheEntry{},
 	)
 	if err != nil {
 		logrus.Fatalf("migrate database error: %v", err)
