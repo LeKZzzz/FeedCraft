@@ -12,7 +12,7 @@ func GetSummaryCraftOptions(prompt string) []CraftOption {
 		ret := processItemContent(item, processor)
 		return ret, nil
 	}
-	cachedTransformer := GetCommonCachedTransformer(cacheKeyForArticleTitle, transFunc, string(constant.ProcessorTypeSummary))
+	cachedTransformer := GetCommonCachedTransformer(unifiedItemKeyGen, transFunc, string(constant.ProcessorTypeSummary))
 	craftOption := []CraftOption{
 		OptionTransformFeedItem(GetArticleContentProcessor(cachedTransformer)),
 	}

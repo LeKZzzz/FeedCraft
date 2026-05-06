@@ -66,7 +66,7 @@ func GetBeautifyContentCraftOptions(prompt string) []CraftOption {
 	}
 
 	cachedTransformer := GetCommonCachedTransformer(
-		cacheKeyForArticleContent, transFunc, "beautify article content")
+		unifiedItemKeyGen, transFunc, "beautify article content")
 
 	craftOption := []CraftOption{
 		OptionTransformFeedItem(GetArticleContentProcessor(cachedTransformer)),

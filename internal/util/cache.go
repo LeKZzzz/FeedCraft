@@ -3,6 +3,7 @@ package util
 import (
 	"FeedCraft/internal/constant"
 	"context"
+	"encoding/json"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"log"
@@ -82,4 +83,58 @@ func CachedFuncWithPreLog(cacheKey string, valFunc func() (string, error), preLo
 // CachedFunc 先尝试取缓存, 如不存在, 则调用valFunc 获取值并写入缓存
 func CachedFunc(cacheKey string, valFunc func() (string, error)) (string, error) {
 	return CachedFuncWithPreLog(cacheKey, valFunc, nil)
+}
+
+// CachedFuncWithStructuredValue stores results as structured JSON {value, meta} in Redis.
+// On cache miss, logs the metadata fields for traceability.
+func CachedFuncWithStructuredValue(cacheKey string, metaJSON string, valFunc func() (string, error), preLog func(isCached bool)) (string, error) {
+	logKey := cacheKey
+	if len(logKey) > 50 {
+		logKey = logKey[:50] + "..."
+	}
+
+	cached, err := CacheGetString(cacheKey)
+	isCached := err == nil && cached != ""
+
+	if isCached {
+		var entry struct {
+			Value string `json:"value"`
+		}
+		if jsonErr := json.Unmarshal([]byte(cached), &entry); jsonErr == nil && entry.Value != "" {
+			logrus.WithField("cacheKey", logKey).Debugf("cache hit")
+			if preLog != nil {
+				preLog(true)
+			}
+			return entry.Value, nil
+		}
+	}
+
+	logrus.WithField("cacheKey", logKey).
+		WithField("meta", metaJSON).
+		Infof("cache miss, invoking valFunc")
+
+	if preLog != nil {
+		preLog(false)
+	}
+
+	start := time.Now()
+	result, valErr := valFunc()
+	if valErr != nil {
+		return "", valErr
+	}
+	logrus.WithField("cacheKey", logKey).WithField("duration", time.Since(start)).Infof("valFunc completed")
+
+	entryJSON := `{"value":` + mustJSONString(result) + `,"meta":` + metaJSON + `}`
+	cacheErr := CacheSetString(cacheKey, entryJSON, constant.WebContentExpire)
+	if cacheErr != nil {
+		logrus.WithField("cacheKey", logKey).WithError(cacheErr).Warn("failed to cache result")
+	}
+
+	return result, nil
+}
+
+// mustJSONString returns a JSON-escaped string value (with quotes).
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

@@ -20,7 +20,7 @@ func GetCleanupCraftOptions() []CraftOption {
 		return CleanupContent(item.Content, domain)
 	}
 	cachedTransFunc := GetCommonCachedTransformer(
-		cacheKeyForArticleContent,
+		unifiedItemKeyGen,
 		transFunc,
 		"cleanup article content",
 	)

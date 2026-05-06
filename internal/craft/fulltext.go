@@ -79,7 +79,7 @@ func GetFulltextCraftOptions() []CraftOption {
 		link := item.Link.Href
 		return TrivialExtractor(link, DefaultExtractFulltextTimeout)
 	}
-	cachedTransFunc := GetCommonCachedTransformer(cacheKeyForArticleLink, transFunc, "extract fulltext")
+	cachedTransFunc := GetCommonCachedTransformer(unifiedItemKeyGen, transFunc, "extract fulltext")
 	relativeLinkFixOptions := GetRelativeLinkFixCraftOptions()
 	var craftOptions []CraftOption
 	craftOptions = append(craftOptions, relativeLinkFixOptions...)

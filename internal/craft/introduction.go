@@ -107,7 +107,7 @@ func GetAddIntroductionCraftOptions(prompt string) []CraftOption {
 		ret := processItemContent(item, processor)
 		return ret, nil
 	}
-	cachedTransformer := GetCommonCachedTransformer(cacheKeyForArticleTitle, transFunc, string(constant.ProcessorTypeIntroduction))
+	cachedTransformer := GetCommonCachedTransformer(unifiedItemKeyGen, transFunc, string(constant.ProcessorTypeIntroduction))
 	craftOption := []CraftOption{
 		OptionTransformFeedItem(GetArticleContentProcessor(cachedTransformer)),
 	}

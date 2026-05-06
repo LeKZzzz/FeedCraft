@@ -71,7 +71,7 @@ func GetFulltextPlusCraftOptions(config FulltextPlusConfig) []CraftOption {
 		return getRenderedHTML2(link, opts)
 	}
 
-	cachedTransFunc := GetCommonCachedTransformer(cacheKeyForArticleLink, transFunc, "extract fulltext plus")
+	cachedTransFunc := GetCommonCachedTransformer(unifiedItemKeyGen, transFunc, "extract fulltext plus")
 
 	relativeLinkFixOptions := GetRelativeLinkFixCraftOptions()
 

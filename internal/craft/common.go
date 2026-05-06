@@ -152,12 +152,12 @@ func CommonCraftHandlerUsingCraftOptionList(c *gin.Context, optionList []CraftOp
 
 type RawTransformer func(item *feeds.Item) (string, error)
 
-func GetCommonCachedTransformer(cacheKeyGenerator ContentCacheKeyGenerator, rawTransformer TransFunc, craftName string) TransFunc {
+func GetCommonCachedTransformer(cacheKeyGenerator func(item *feeds.Item) (CacheKeyResult, error), rawTransformer TransFunc, craftName string) TransFunc {
 	ret := func(item *feeds.Item) (string, error) {
 		originalTitle := item.Title
 
-		hashVal, _ := cacheKeyGenerator(item)
-		cacheKey := getCraftCacheKey(craftName, hashVal)
+		result, _ := cacheKeyGenerator(item)
+		cacheKey := getCraftCacheKey(craftName, result.Hash)
 
 		valFunc := func() (string, error) {
 			ret, err := rawTransformer(item)
@@ -167,7 +167,7 @@ func GetCommonCachedTransformer(cacheKeyGenerator ContentCacheKeyGenerator, rawT
 			return ret, err
 		}
 
-		return util.CachedFuncWithPreLog(cacheKey, valFunc, func(isCached bool) {
+		return util.CachedFuncWithStructuredValue(cacheKey, result.MetaJSON, valFunc, func(isCached bool) {
 			logrus.Infof("applying craft [%s] to article [%s], cached: %v", craftName, originalTitle, isCached)
 		})
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type ArticleCacheKeyGenerator func(article *model.CraftArticle) (string, error)
 type ArticleTransformFunc func(ctx context.Context, article *model.CraftArticle) (string, error)
 type CleanupTransformFunc func(content string, domain string) (string, error)
 type FulltextPlusExtractor func(url string, options util.BrowserlessOptions) (string, error)
@@ -106,7 +105,7 @@ func (p *FulltextPlusProcessor) Process(ctx context.Context, feed *model.CraftFe
 
 func newCleanupProcessor() *CleanupProcessor {
 	transformer := GetCommonCachedArticleTransformer(
-		cacheKeyForCraftArticleContent,
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			content := article.Content
 			if strings.TrimSpace(content) == "" {
@@ -128,7 +127,7 @@ func newCleanupProcessor() *CleanupProcessor {
 
 func newFulltextProcessor(originalFeedURL string) *FulltextProcessor {
 	transformer := GetCommonCachedArticleTransformer(
-		cacheKeyForCraftArticleLink,
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			return fulltextExtractFunc(article.Link, DefaultExtractFulltextTimeout)
 		},
@@ -146,7 +145,7 @@ func newFulltextProcessor(originalFeedURL string) *FulltextProcessor {
 
 func newFulltextPlusProcessor(originalFeedURL string, config FulltextPlusConfig) *FulltextPlusProcessor {
 	transformer := GetCommonCachedArticleTransformer(
-		cacheKeyForCraftArticleLink,
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			opts := util.BrowserlessOptions{
 				Timeout:   DefaultExtractFulltextTimeout,
@@ -173,36 +172,23 @@ func newFulltextPlusProcessor(originalFeedURL string, config FulltextPlusConfig)
 	}
 }
 
-func GetCommonCachedArticleTransformer(cacheKeyGenerator ArticleCacheKeyGenerator, rawTransformer ArticleTransformFunc, craftName string) ArticleTransformFunc {
+func GetCommonCachedArticleTransformer(cacheKeyGenerator func(article *model.CraftArticle) (CacheKeyResult, error), rawTransformer ArticleTransformFunc, craftName string) ArticleTransformFunc {
 	return func(ctx context.Context, article *model.CraftArticle) (string, error) {
-		hashVal, err := cacheKeyGenerator(article)
+		result, err := cacheKeyGenerator(article)
 		if err != nil {
 			return "", err
 		}
-		cacheKey := getCraftCacheKey(craftName, hashVal)
+		cacheKey := getCraftCacheKey(craftName, result.Hash)
 		logKey := cacheKey
 		if len(logKey) > 50 {
 			logKey = logKey[:50] + "..."
 		}
-		return util.CachedFuncWithPreLog(cacheKey, func() (string, error) {
+		return util.CachedFuncWithStructuredValue(cacheKey, result.MetaJSON, func() (string, error) {
 			return rawTransformer(ctx, article)
 		}, func(isCached bool) {
 			logrus.WithField("cacheKey", logKey).Infof("applying craft [%s] to article [%s], cached: %v", craftName, article.Title, isCached)
 		})
 	}
-}
-
-func cacheKeyForCraftArticleContent(article *model.CraftArticle) (string, error) {
-	content := article.Content
-	if strings.TrimSpace(content) == "" {
-		content = article.Description
-	}
-	return util.GetMD5Hash(content), nil
-}
-
-func cacheKeyForCraftArticleLink(article *model.CraftArticle) (string, error) {
-	uniqLinkStr := article.Title + article.Id + article.Link
-	return util.GetMD5Hash(uniqLinkStr), nil
 }
 
 func applyRelativeLinkFix(ctx context.Context, feed *model.CraftFeed, originalFeedURL string) (*model.CraftFeed, error) {

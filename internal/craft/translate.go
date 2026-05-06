@@ -32,25 +32,6 @@ func translateArticleContent(content string, prompt string) (string, error) {
 	return adapter.CallLLMUsingContext(prompt, content, util.ContentProcessOption{})
 }
 
-type ContentCacheKeyGenerator TransFunc
-
-func cacheKeyForArticleTitle(item *feeds.Item) (string, error) {
-	return util.GetMD5Hash(item.Title), nil
-}
-func cacheKeyForArticleContent(item *feeds.Item) (string, error) {
-	return util.GetMD5Hash(item.Description), nil
-}
-func cacheKeyForArticleLink(item *feeds.Item) (string, error) {
-	uniqLinkStr := item.Title
-	uniqLinkStr += item.Id
-	if item.Link != nil {
-		uniqLinkStr += item.Link.Href
-	} else if item.Source != nil {
-		uniqLinkStr += item.Source.Href
-	}
-	return util.GetMD5Hash(uniqLinkStr), nil
-}
-
 // =======================================
 // translate article title
 // ===
@@ -89,7 +70,7 @@ func GetTranslateTitleCraftOptions(prompt string) []CraftOption {
 		}
 		return translateArticleTitle(item.Title, finalPrompt)
 	}
-	transformer := GetCommonCachedTransformer(cacheKeyForArticleTitle, transFunc, "translate title")
+	transformer := GetCommonCachedTransformer(unifiedItemKeyGen, transFunc, "translate title")
 	craftOption := []CraftOption{
 		OptionTransformFeedItem(
 			GetArticleTitleProcessor(transformer),
@@ -150,7 +131,7 @@ func GetTranslateContentCraftOptions(prompt string) []CraftOption {
 		return translateArticleContent(contentToTranslate, finalPrompt) // TODO handle feed item content correctly
 	}
 	cachedTransformer := GetCommonCachedTransformer(
-		cacheKeyForArticleContent, transFunc, "translate article content")
+		unifiedItemKeyGen, transFunc, "translate article content")
 	craftOption := []CraftOption{
 		OptionTransformFeedItem(GetArticleContentProcessor(cachedTransformer)),
 	}

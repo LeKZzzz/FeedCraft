@@ -95,7 +95,7 @@ func CallLLMForArticlePredicate(prompt, title, content string) (bool, error) {
 func newSummaryProcessor(prompt string) *ArticleTextTransformProcessor {
 	finalPrompt := renderTargetLangPrompt(prompt, constant.DefaultPrompts[constant.ProcessorTypeSummary])
 	transformer := GetCommonCachedArticleTransformer(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			original := getPrimaryArticleContent(article)
 			if strings.TrimSpace(original) == "" {
@@ -132,7 +132,7 @@ func newSummaryProcessor(prompt string) *ArticleTextTransformProcessor {
 func newIntroductionProcessor(prompt string) *ArticleTextTransformProcessor {
 	finalPrompt := renderTargetLangPrompt(prompt, constant.DefaultPrompts[constant.ProcessorTypeIntroduction])
 	transformer := GetCommonCachedArticleTransformer(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			original := getPrimaryArticleContent(article)
 			if strings.TrimSpace(original) == "" {
@@ -170,7 +170,7 @@ func newTranslateTitleProcessor(prompt string) *ArticleTextTransformProcessor {
 	finalPrompt := renderTargetLangPrompt(prompt, translateArticleTitlePrompt)
 	targetLangCode := util.GetDefaultTargetLang()
 	transformer := GetCommonCachedArticleTransformer(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			title := strings.TrimSpace(article.Title)
 			if title == "" || util.IsSameLanguage(title, targetLangCode) {
@@ -206,7 +206,7 @@ func newArticleContentLLMProcessor(craftName, prompt, defaultPrompt string) *Art
 	finalPrompt := renderTargetLangPrompt(prompt, defaultPrompt)
 	targetLangCode := util.GetDefaultTargetLang()
 	transformer := GetCommonCachedArticleTransformer(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			content := getPrimaryArticleContent(article)
 			if strings.TrimSpace(content) == "" || util.IsSameLanguage(content, targetLangCode) {
@@ -237,7 +237,7 @@ func newBeautifyContentProcessor(prompt string) *ArticleTextTransformProcessor {
 		finalPrompt = beautifyArticleContentPrompt
 	}
 	transformer := GetCommonCachedArticleTransformer(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (string, error) {
 			content := getPrimaryArticleContent(article)
 			if strings.TrimSpace(content) == "" {
@@ -268,7 +268,7 @@ func newLLMFilterProcessor(condition string) *ArticlePredicateProcessor {
 		condition = "Is this content spam or low quality?"
 	}
 	matcher := GetCommonCachedArticlePredicate(
-		newArticleTitleContentCacheKeyGenerator(condition),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (bool, error) {
 			content := getPrimaryArticleContent(article)
 			return CheckConditionWithGenericPrompt(article.Title, content, condition)
@@ -287,7 +287,7 @@ func newIgnoreAdvertorialProcessor(prompt string) *ArticlePredicateProcessor {
 		finalPrompt = fmt.Sprintf("%s\n%s\n", judgePrompt, promptCheckIfAdvertorial)
 	}
 	matcher := GetCommonCachedArticlePredicate(
-		newArticleTitleContentCacheKeyGenerator(finalPrompt),
+		unifiedArticleKeyGen,
 		func(ctx context.Context, article *model.CraftArticle) (bool, error) {
 			content := getPrimaryArticleContent(article)
 			return CallLLMForArticlePredicate(finalPrompt, article.Title, content)
@@ -300,14 +300,14 @@ func newIgnoreAdvertorialProcessor(prompt string) *ArticlePredicateProcessor {
 	}
 }
 
-func GetCommonCachedArticlePredicate(cacheKeyGenerator ArticleCacheKeyGenerator, rawPredicate ArticlePredicateFunc, craftName string) ArticlePredicateFunc {
+func GetCommonCachedArticlePredicate(cacheKeyGenerator func(article *model.CraftArticle) (CacheKeyResult, error), rawPredicate ArticlePredicateFunc, craftName string) ArticlePredicateFunc {
 	return func(ctx context.Context, article *model.CraftArticle) (bool, error) {
-		hashVal, err := cacheKeyGenerator(article)
+		result, err := cacheKeyGenerator(article)
 		if err != nil {
 			return false, err
 		}
-		cacheKey := getCraftCacheKey(craftName, hashVal)
-		value, err := util.CachedFunc(cacheKey, func() (string, error) {
+		cacheKey := getCraftCacheKey(craftName, result.Hash)
+		value, err := util.CachedFuncWithStructuredValue(cacheKey, result.MetaJSON, func() (string, error) {
 			matched, callErr := rawPredicate(ctx, article)
 			if callErr != nil {
 				return "", callErr
@@ -316,25 +316,13 @@ func GetCommonCachedArticlePredicate(cacheKeyGenerator ArticleCacheKeyGenerator,
 				return "true", nil
 			}
 			return "false", nil
-		})
+		}, nil)
 		if err != nil {
 			return false, err
 		}
-		result := strings.EqualFold(strings.TrimSpace(value), "true")
-		logrus.WithField("craft", craftName).WithField("article", article.Title).WithField("matched", result).Debugf("predicate evaluated")
-		return result, nil
-	}
-}
-
-func newArticleTitleContentCacheKeyGenerator(prompt string) ArticleCacheKeyGenerator {
-	promptHash := util.GetMD5Hash(prompt)
-	return func(article *model.CraftArticle) (string, error) {
-		payloadHash := util.GetMD5Hash(strings.Join([]string{
-			promptHash,
-			strings.TrimSpace(article.Title),
-			strings.TrimSpace(getPrimaryArticleContent(article)),
-		}, "|"))
-		return payloadHash, nil
+		parsed := strings.EqualFold(strings.TrimSpace(value), "true")
+		logrus.WithField("craft", craftName).WithField("article", article.Title).WithField("matched", parsed).Debugf("predicate evaluated")
+		return parsed, nil
 	}
 }
 
