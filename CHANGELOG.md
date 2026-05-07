@@ -5,6 +5,8 @@
 ### ✨ 新特性 (Features & Refactors)
 
 - **调度与并发优化 (Dispatcher & Concurrency)**:
+  - LLM 调用超时从 10 分钟放宽到 30 分钟，适配长文翻译场景
+  - 移除 LLM 重试机制（retry-go），超时/失败后直接跳过，避免单篇文章占用 Worker 过久
   - 增加 LLM 并发控制逻辑 (concurrency control)
   - fulltext crafts 类新增 domain 级别 rate limiting
 - **搜索与 RSS (Search & RSS)**:

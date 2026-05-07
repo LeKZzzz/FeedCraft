@@ -1,6 +1,6 @@
 # LLM 与网页抓取并发控制及重试机制改造方案
 
-> 状态：部分完成
+> 状态：已完成（2026-05-07 更新：移除 retry-go 重试机制，LLM 超时从 10min 调整为 30min）
 
 ## 1. 原始核心需求与场景痛点
 
@@ -23,11 +23,11 @@
 
 - **场景特点**：
   - 目标单一：绝大多数情况下，所有请求都打向同一个或固定的几个 LLM 代理网关端点。
-  - 失败成本高且需重试：由于网络抖动和后端限流，失败率相对较高，需要引入重试退避机制。
-  - 积压问题：如果失败重试的请求排在所有新请求末尾，极易导致该上层 Web 请求直接超时。
+  - 单次调用耗时长：翻译长文可能需要数分钟到数十分钟，需要足够长的超时时间。
 - **解决方案**：引入泛型的 `PriorityDispatcher` 模块。
   - 内部预启动固定数量的 Worker 协程（如 5 个），这天然实现了**全局绝对最大并发限制**。
-  - 采用普通队列 (`normalQueue`) 和高优队列 (`urgentQueue`) 双通道设计。当请求因失败而触发 `retry-go` 退避休眠后，将其唤醒投入高优队列，Worker 一旦空闲即可“插队”接手，确保旧请求能尽早闭环释放连接。
+  - 采用普通队列 (`normalQueue`) 和高优队列 (`urgentQueue`) 双通道设计，支持优先级调度。
+  - 单次调用超时 30 分钟，不重试。超时或失败后直接跳过该文章，避免长时间占用 Worker。
 
 ### 2.2 典型场景二：Fulltext 网页抓取 (哈希分片限流 + 信号量)
 
@@ -41,9 +41,8 @@
 
 ### 2.3 优雅的第三方库集成
 
-- 避免重复造轮子，引入三个流行库支撑上述架构：
-  - **`github.com/sourcegraph/conc`**：在上层业务逻辑 (`craft`) 负责“尽情发散并发”，替换冗长的 `sync.WaitGroup`。
-  - **`github.com/avast/retry-go/v4`**：负责优雅重试与指数退避，与 `PriorityDispatcher` 完美结合。
+- 避免重复造轮子，引入流行库支撑上述架构：
+  - **`github.com/sourcegraph/conc`**：在上层业务逻辑 (`craft`) 负责”尽情发散并发”，替换冗长的 `sync.WaitGroup`。
   - **`golang.org/x/sync/semaphore`**：构建按域名并发的底层支撑。
 
 ---
@@ -56,8 +55,8 @@
 
 ```bash
 go get github.com/sourcegraph/conc
-go get github.com/avast/retry-go/v4
 go get golang.org/x/sync/semaphore
+# 注意：retry-go 已移除，不再使用
 ```
 
 ### 3.2 核心基建 1：实现 `PriorityDispatcher` (服务于 LLM)
@@ -78,12 +77,13 @@ go get golang.org/x/sync/semaphore
   - 封装基于 `sync.Map` 和 `semaphore.Weighted` 的动态限流器。
   - 提供 `Acquire(ctx context.Context, key string) (release func(), err error)` 方法。
 
-### 3.4 LLM 客户端连接复用与重试组装
+### 3.4 LLM 客户端连接复用
 
 - **路径**: `internal/adapter/common_llm.go`
 - **实现细节**:
-  - 增加 `llmClientCache sync.Map` 缓存已初始化的客户端，复用 TCP 握手。
-  - 在 `SimpleLLMCall` 中，利用 `retry.DoWithData` 包裹执行逻辑，根据尝试次数决定优先级，向 `PriorityDispatcher` 提交任务。
+  - `llmClients sync.Map` 缓存已初始化的客户端，复用 TCP 握手。
+  - 在 `SimpleLLMCall` 中，直接通过 `PriorityDispatcher.Execute` 提交任务，单次调用超时 30 分钟。
+  - 不再使用 `retry-go`，失败后直接跳过，避免长时间占用 Worker。
 
 ### 3.5 Fulltext 抓取并发限制
 

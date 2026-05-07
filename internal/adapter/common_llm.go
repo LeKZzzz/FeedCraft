@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/sirupsen/logrus"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/ollama"
@@ -24,7 +23,7 @@ Handle LLM calling and processing, support OpenAI and all compatible services.
 
 const UseDefaultModel = ""
 
-var llmCallTimeout = 10 * time.Minute
+var llmCallTimeout = 30 * time.Minute
 var (
 	// llmClients acts as a lazy-loaded singleton registry, NOT a traditional acquire/release connection pool.
 	// It maps configuration keys to a single llms.Model instance.
@@ -49,7 +48,7 @@ func getLLMDispatcher() *util.PriorityDispatcher[string] {
 		}
 		llmDispatcher = util.NewPriorityDispatcher[string](concurrency)
 		// Fallback timeout to prevent tasks from sticking forever
-		// llmCallTimeout is 10 min, we set fallback to 11 min
+		// llmCallTimeout is 30 min, we set fallback to 31 min
 		llmDispatcher.MaxTaskDuration = llmCallTimeout + time.Minute
 		logrus.Infof("LLM Global Priority Dispatcher initialized with max concurrency: %d", concurrency)
 	})
@@ -153,44 +152,30 @@ func SimpleLLMCall(model string, promptInput string) (string, error) {
 		dispatcher := getLLMDispatcher()
 
 		// try to execute
-		isUrgent := false // Will be set to true on retry
+		result, err := dispatcher.Execute(context.Background(), false, func(ctx context.Context) (string, error) {
+			ctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
+			defer cancel()
 
-		result, err := retry.DoWithData(
-			func() (string, error) {
-				return dispatcher.Execute(context.Background(), isUrgent, func(ctx context.Context) (string, error) {
-					ctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
-					defer cancel()
+			content := []llms.MessageContent{
+				llms.TextParts(llms.ChatMessageTypeHuman, promptInput),
+			}
 
-					content := []llms.MessageContent{
-						llms.TextParts(llms.ChatMessageTypeHuman, promptInput),
-					}
-
-					resp, err := llm.GenerateContent(ctx, content)
-					if err != nil {
-						return "", err
-					}
-					if len(resp.Choices) > 0 {
-						return resp.Choices[0].Content, nil
-					}
-					return "", fmt.Errorf("empty llm call response")
-				})
-			},
-			retry.Attempts(3),
-			retry.DelayType(retry.BackOffDelay),
-			retry.Delay(2*time.Second),
-			retry.MaxDelay(10*time.Second),
-			retry.OnRetry(func(n uint, err error) {
-				isUrgent = true // Elevate priority on retry
-				logrus.Warnf("Retrying LLM call (attempt %d) with model %s, err: %v", n+1, currentModel, err)
-			}),
-		)
+			resp, err := llm.GenerateContent(ctx, content)
+			if err != nil {
+				return "", err
+			}
+			if len(resp.Choices) > 0 {
+				return resp.Choices[0].Content, nil
+			}
+			return "", fmt.Errorf("empty llm call response")
+		})
 
 		if err == nil {
 			return result, nil
 		}
 
 		lastErr = err
-		logrus.Warnf("LLM call failed with model %s after retries: %v", currentModel, err)
+		logrus.Warnf("LLM call failed with model %s: %v", currentModel, err)
 	}
 
 	return "", fmt.Errorf("all models failed, last error: %v", lastErr)
